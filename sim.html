@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Ferrofluid Simulator</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: white;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        let frame = 0;
+        const colorModes = ['black', 'white', 'color'];
+        window.color = 'black';
+        document.onkeydown = function(e) {
+            if (e.keyCode == 32) {
+                window.color = colorModes[(colorModes.indexOf(window.color) + 1) % colorModes.length];
+                document.body.style.backgroundColor = window.color === 'black' ? 'white' : 'black';
+            }
+        };
+        // Get the canvas and context
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Resize the canvas to fill the browser window dynamically
+        window.addEventListener('resize', resizeCanvas, false);
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        resizeCanvas();
+
+        // Particle class
+        class Particle {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.vx = 0;
+                this.vy = 0;
+            }
+
+            update(magnets, strength, index) {
+                let fx = 0;
+                let fy = 0;
+
+                // Calculate force from each magnet
+                for (let magnet of magnets) {
+                    let dx = magnet.x - this.x;
+                    let dy = magnet.y - this.y;
+                    let distance = Math.sqrt(dx * dx + dy * dy);
+                    let force = (magnet.strength) / (distance * distance);
+                    fx += dx * force;
+                    fy += dy * force;
+                }
+
+                // Particle-particle attraction (optional)
+                for (let other of particles) {
+                    if (other !== this) {
+                        let dx = other.x - this.x;
+                        let dy = other.y - this.y;
+                        let distanceSq = dx * dx + dy * dy;
+                        if (distanceSq < 100) { // Interaction radius
+                            let force = 100 / (distanceSq + 1000);
+                            fx += dx * -force;
+                            fy += dy * -force;
+                        }
+                    }
+                }
+
+                // Update velocity and position
+                fx = Math.min(Math.max(fx, -10), 10);
+                fy = Math.min(Math.max(fy, -10), 10);
+                this.vx = (this.vx + fx) * 0.95;
+                this.vy = (this.vy + fy) * 0.95;
+                this.x += this.vx;
+                this.y += this.vy;
+
+                // Draw particle
+                if (window.color === 'color') {
+                    ctx.fillStyle = 'hsl(' + (index + frame) + ', 100%, 50%)';
+                } else {
+                    ctx.fillStyle = window.color;
+                }
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, 10 + (strength / 10), 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // Initialize particles
+        const particles = [];
+        const numParticles = 1000;
+        for (let i = 0; i < numParticles; i++) {
+            particles.push(new Particle(Math.random() * canvas.width, Math.random() * canvas.height));
+        }
+
+        // Initialize magnets
+
+        const magnetMode1 = [
+            { x: canvas.width / 2, y: canvas.height / 2, strength: 0 },
+        ]
+        const magnetMode2 = [
+            { x: canvas.width / 2, y: canvas.height / 4, strength: 0 },
+            { x: canvas.width / 2, y: canvas.height * 3 / 4, strength: 0 }
+        ]
+        const magnetMode3 = [
+            { x: canvas.width / 4, y: canvas.height / 2, strength: 0 },
+            { x: canvas.width * 3 / 4, y: canvas.height / 2, strength: 0 }
+        ]
+        let currentMode = 0;
+        const magnetModes = [magnetMode1, magnetMode2, magnetMode3];
+        let magnets = magnetMode1;
+        let last = 0;
+        let total = 0;
+
+        // Get microphone input
+        navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(function(stream) {
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const microphone = audioContext.createMediaStreamSource(stream);
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            microphone.connect(analyser);
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+            function animate() {
+                frame += 1;
+                requestAnimationFrame(animate);
+
+                // Get audio data
+                analyser.getByteFrequencyData(dataArray);
+                let sum = 0;
+                for (let i = 0; i < dataArray.length; i++) {
+                    sum += dataArray[i];
+                }
+                const average = sum / dataArray.length;
+
+                // Update magnet strength based on audio input
+                for (m in magnets) {
+                    magnets[m].strength = (average / 10) * (average / 10);
+                }
+
+                total += average;
+                if (average > last * 1.3 && total > 5000) {
+                  console.log('change', average, last, total);
+                    total = 0;
+                    currentMode = (currentMode + 1) % magnetModes.length;
+                    magnets = magnetModes[currentMode];
+                }
+                last = average;
+
+                // Clear canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                // Update and draw particles
+                let index = 0;
+                for (let particle of particles) {
+                    particle.update(magnets, (average / 10) * (average / 10), index++);
+                }
+            }
+
+            animate();
+        })
+        .catch(function(err) {
+            console.error('Error accessing microphone: ' + err);
+        });
+    </script>
+</body>
+</html>
