@@ -113,6 +113,12 @@
           } else {
             ctx.fillStyle = window.color;
           }
+          if (window.color === "white" && index < 200) {
+            ctx.fillStyle = "black";
+          }
+          if (window.color === "black" && index < 200) {
+            ctx.fillStyle = "white";
+          }
           if (index < 150) {
             ctx.fillStyle = "black";
           } else if (index < 300) {
