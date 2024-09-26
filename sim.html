@@ -5,11 +5,12 @@
     <style>
       body {
         margin: 0;
-        background-color: white;
         overflow: hidden;
       }
       canvas {
+        background-color: white;
         display: block;
+        filter: blur(2px) contrast(20);
       }
     </style>
   </head>
@@ -27,7 +28,7 @@
             colorModes[
               (colorModes.indexOf(window.color) + 1) % colorModes.length
             ];
-          document.body.style.backgroundColor =
+          document.getElementById("canvas").style.backgroundColor =
             window.color === "black" ? "white" : "black";
         }
         // key code for number 1
@@ -112,8 +113,20 @@
           } else {
             ctx.fillStyle = window.color;
           }
+          if (index < 150) {
+            ctx.fillStyle = "black";
+          } else if (index < 300) {
+            ctx.fillStyle = "white";
+          }
+
           ctx.beginPath();
-          ctx.arc(this.x, this.y, 10 + strength / 10, 0, Math.PI * 2);
+          ctx.arc(
+            this.x,
+            this.y,
+            10 + (strength * strength) / 10,
+            0,
+            Math.PI * 2
+          );
           ctx.fill();
         }
       }
