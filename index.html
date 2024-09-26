@@ -129,7 +129,7 @@
           ctx.arc(
             this.x,
             this.y,
-            10 + (strength * strength) / 10,
+            Math.min(10 + (strength * strength) / 10, 50),
             0,
             Math.PI * 2
           );
