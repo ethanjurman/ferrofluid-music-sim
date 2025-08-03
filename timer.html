@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Ferrofluid Simulator</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=MedievalSharp&family=Nova+Cut&family=Pirata+One&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      html * {
+        font-family: "Courier Prime", system-ui;
+        font-weight: 400;
+        font-style: normal;
+        font-variant-numeric: tabular-nums;
+      }
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+      canvas {
+        background-color: #ffe900;
+        display: block;
+        filter: blur(2px) contrast(20);
+      }
+      #time {
+        position: absolute;
+        top: 10%;
+        left: calc(50%);
+        transform: translate(-50%);
+        font-size: 75px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas"></canvas>
+    <div id="time"></div>
+    <script>
+      class TimeProvider {
+        constructor({ offset = 0, speed = 1 } = {}) {
+          this._offset = offset;
+          this._speed = speed;
+          this._baseReal = Date.now();
+          this._baseFake = this._baseReal + offset;
+        }
+
+        now() {
+          // how many ms have passed in real‑world, scaled by speed, then added to fake base
+          return this._baseFake + (Date.now() - this._baseReal) * this._speed;
+        }
+
+        date() {
+          return new Date(this.now());
+        }
+
+        // jump forward/backward:
+        setOffset(ms) {
+          // recalc bases so future offsets stack cleanly
+          this._baseFake = this.now();
+          this._baseReal = Date.now();
+          this._offset = ms;
+          this._baseFake += ms;
+        }
+
+        // slow down / speed up:
+        setSpeed(factor) {
+          this._baseFake = this.now();
+          this._baseReal = Date.now();
+          this._speed = factor;
+        }
+      }
+
+      let shake = -1;
+      const clock = new TimeProvider();
+
+      const params = new URLSearchParams(window.location.search);
+      const timerMinutes = params.get("time");
+      const startTime = clock.date().getTime();
+      const endTime = startTime + timerMinutes * 60 * 1000;
+
+      function getTimeDifferenceAsString(dateA, dateB) {
+        // Milliseconds difference
+        let diffMs = Math.max(dateB - dateA, 0);
+        let totalSeconds = Math.floor(diffMs / 1000);
+
+        // Compute hours, minutes, seconds
+        const hours = Math.floor(totalSeconds / 3600);
+        totalSeconds %= 3600;
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+
+        // Zero‑pad to always get 2 digits
+        const pad = (n) => String(n).padStart(2, "0");
+        return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+      }
+
+      function clampToCircle(x, y, c_x, c_y, R) {
+        const dx = x - c_x;
+        const dy = y - c_y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > R) {
+          const ratio = R / dist;
+          x = c_x + dx * ratio;
+          y = c_y + dy * ratio;
+        }
+        return { x, y };
+      }
+
+      let frame = 0;
+      let forcedMagnetMode = -1;
+      document.onkeydown = function (e) {
+        // should adjust timing
+        if (e.key === "ArrowRight") {
+          // speed up
+          clock.setSpeed(clock._speed * 1.5);
+        }
+        if (e.key === "ArrowLeft") {
+          // speed down
+          clock.setSpeed(clock._speed * 0.5);
+        }
+        if (e.key === "ArrowDown") {
+          // 10,000 ms skip
+          clock.setOffset(10_000);
+        }
+        if (e.key === "ArrowUp") {
+          // 10,000 ms back
+          clock.setOffset(-10_000);
+        }
+        if (e.key === " ") {
+          // reset
+          clock.setSpeed(1);
+          shake = 10;
+        }
+      };
+      // Get the canvas and context
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+
+      // Resize the canvas to fill the browser window dynamically
+      window.addEventListener("resize", resizeCanvas, false);
+      function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      resizeCanvas();
+
+      // Particle class
+      class Particle {
+        constructor(
+          x = canvas.width / 2 + (Math.random() - 1) * 100,
+          y = canvas.height / 2 + (Math.random() - 1) * 100
+        ) {
+          this.x = x;
+          this.y = y;
+          this.vx = 0;
+          this.vy = 0;
+        }
+
+        update(magnets, strength, index) {
+          let fx = 0;
+          let fy = 0;
+
+          // Calculate force from each magnet
+          for (let magnet of magnets) {
+            let dx = magnet.x - this.x;
+            let dy = magnet.y - this.y;
+            let distance = Math.sqrt(dx * dx + dy * dy);
+            let force = magnet.strength / (distance * distance);
+            fx += dx * force;
+            fy += dy * force;
+          }
+
+          // Particle-particle attraction (optional)
+          for (let other of particles) {
+            if (other !== this) {
+              let dx = other.x - this.x;
+              let dy = other.y - this.y;
+              let distanceSq = dx * dx + dy * dy;
+              if (distanceSq < 100) {
+                // Interaction radius
+                let force = 100 / (distanceSq + 1000);
+                fx += dx * -force;
+                fy += dy * -force;
+              }
+            }
+          }
+
+          // Update velocity and position
+          fx = Math.min(Math.max(fx, -10), 10) * Math.min(clock._speed, 2);
+          fy = Math.min(Math.max(fy, -10), 10) * Math.min(clock._speed, 2);
+          this.vx = (this.vx + fx) * 0.95;
+          this.vy = (this.vy + fy) * 0.95;
+          this.x += this.vx;
+          this.y += this.vy;
+          const { x: clampedX, y: clampedY } = clampToCircle(
+            this.x,
+            this.y,
+            canvas.width / 2 + (shake > 0 && Math.random() * 100 - 50),
+            canvas.height / 2 + (shake > 0 && Math.random() * 100 - 50),
+            Math.min(canvas.width, canvas.height) / 2.5
+          );
+          this.x = clampedX;
+          this.y = clampedY;
+
+          // Draw particle
+          const totalMs = endTime - startTime; // 4 140 000
+          const elapsedMs = clock.date().getTime() - startTime; // ~82 704 (1.378 min × 60 000)
+          const percentElapsed = elapsedMs / totalMs;
+          ctx.fillStyle =
+            index < percentElapsed * particles.length ? "#000000" : "#FF3EB5";
+
+          ctx.beginPath();
+          ctx.arc(
+            this.x,
+            this.y,
+            Math.min(10 + (strength * strength) / 10, 50),
+            0,
+            Math.PI * 2
+          );
+          ctx.fill();
+        }
+      }
+
+      // Initialize particles
+      const particles = [];
+      const numParticles = 2000;
+      for (let i = 0; i < numParticles; i++) {
+        particles.push(new Particle());
+      }
+
+      // Initialize magnets
+      const magnetMode1 = [
+        { x: canvas.width / 2, y: canvas.height / 2, strength: 0 },
+        { x: canvas.width / 2, y: canvas.height / 2, strength: 0 },
+      ];
+      const magnetMode2 = [
+        { x: canvas.width / 2, y: canvas.height / 4, strength: 0 },
+        { x: canvas.width / 2, y: (canvas.height * 3) / 4, strength: 0 },
+      ];
+      const magnetMode3 = [
+        { x: canvas.width / 4, y: canvas.height / 2, strength: 0 },
+        { x: (canvas.width * 3) / 4, y: canvas.height / 2, strength: 0 },
+      ];
+      let currentMode = 0;
+      const magnetModes = [magnetMode1, magnetMode2, magnetMode3];
+      let magnets = magnetMode1;
+      let last = 0;
+      let total = 0;
+
+      const timerElement = document.querySelector("#time");
+
+      function animate() {
+        frame += 1;
+        if (shake > 0) {
+          shake--;
+        }
+
+        timerElement.textContent = getTimeDifferenceAsString(
+          clock.date(),
+          endTime
+        );
+
+        // Update magnet strength based on audio input
+        for (m in magnets) {
+          magnets[m].strength = ((1 / 10) * (1 / 10)) / 2;
+        }
+
+        total += clock._speed;
+        if (total > 100 && forcedMagnetMode === -1) {
+          total = 0;
+          currentMode = (currentMode + 1) % magnetModes.length;
+          magnets = magnetModes[currentMode];
+        }
+
+        // Clear canvas
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Update and draw particles
+        let index = 0;
+        for (let particle of particles) {
+          particle.update(magnets, (1 / 10) * (1 / 10), index++);
+        }
+        requestAnimationFrame(animate);
+      }
+
+      animate();
+    </script>
+  </body>
+</html>
